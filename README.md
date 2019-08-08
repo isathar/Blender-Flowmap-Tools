@@ -1,5 +1,5 @@
 # Blender-Flowmap-Tools
-A very WIP flowmap creator/editor for Blender.  
+A very WIP flowmap creator/editor for Blender.  (up to v.2.79 - needs to be updated for 2.8)
  
  
 Initial testing release - more features and instructions coming soon.

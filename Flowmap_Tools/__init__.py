@@ -29,17 +29,36 @@ bl_info = {
 	"category": "Mesh"}
 
 
+flow_startlocs = []
+flow_vindex = []
+
+flow_directions = []
+flow_velocities = []
+flow_geominf = []
+
+def clear_flowmapdata(context):
+	del flow_directions[:]
+	del flow_velocities[:]
+	del flow_geominf[:]
+	del flow_vindex[:]
+	del flow_startlocs[:]
+
+
 import bpy
 from mathutils import Vector
-from . import flowmap_data
 
+#classes = (
+#    FooClass,
+#    BarClass,
+#    BazClass,
+#)
 
 # UI Panel
 class flowmaps_editor_panel(bpy.types.Panel):
-	bl_idname = "view3D.flowmaps_editor_panel"
+	bl_idname = "FLOWMAPS_PT_EditorPanel"
 	bl_label = 'Flowmap Editor'
 	bl_space_type = 'VIEW_3D'
-	bl_region_type = 'TOOLS'
+	bl_region_type = 'UI'
 	bl_category = "Particle Simulation"
 	
 	@classmethod
@@ -121,16 +140,30 @@ class create_vectorfield_2d(bpy.types.Operator):
 		flowmesh.particle_systems[0].point_cache.name = 'ForceFlow'
 		
 		context.area.tag_redraw()
-		context.scene.update()
+		bpy.context.view_layer.update()
 		
-		flowmap_data.flow_startlocs = [(p.location).copy() for p in flowmesh.particle_systems[0].particles]
-		flowmap_data.flow_vindex = [get_nearest_vindex(tempvlocs, v) for v in flowmap_data.flow_startlocs]
+		flow_startlocs = [(p.location).copy() for p in flowmesh.particle_systems[0].particles]
+		flow_vindex = [get_nearest_vindex(tempvlocs, v) for v in flow_startlocs]
 		
-		bpy.data.materials.new('flowmat')
-		bpy.data.materials['flowmat'].use_shadeless = True
-		bpy.data.materials['flowmat'].use_vertex_color_paint = True
+		mat = bpy.data.materials.new('flowmat')
 		
-		flowmesh.active_material = bpy.data.materials['flowmat']
+		#
+		mat.use_nodes = True
+		
+		nodes = mat.node_tree.nodes
+		links = mat.node_tree.links
+		
+		nodes.clear()
+		links.clear()
+		
+		node_output = nodes.new('ShaderNodeOutputMaterial')
+		node_diffuse = nodes.new('ShaderNodeBsdfDiffuse')
+		node_attr = nodes.new('ShaderNodeAttribute')	
+		node_attr.attribute_name = "vertex_color_block_flow"
+		
+		link_diffuse_to_output = links.new(node_diffuse.outputs['BSDF'], node_output.inputs['Surface'])
+		link_color_to_diffuse = links.new(node_attr.outputs['Color'], node_diffuse.inputs['Color'])
+		flowmesh.active_material = mat
 		
 		del tempvlocs[:]
 		
@@ -158,9 +191,9 @@ class calc_flowmap_dir(bpy.types.Operator):
 		flowmesh = context.active_object
 		pscurlocs = [(p.location).copy() for p in flowmesh.particle_systems[0].particles]
 		
-		flowmap_data.flow_directions = []
-		for i in range(len(flowmap_data.flow_startlocs)):
-			flowmap_data.flow_directions.append(pscurlocs[i] - flowmap_data.flow_startlocs[i])
+		flow_directions = []
+		for i in range(len(flow_startlocs)):
+			flow_directions.append(pscurlocs[i] - flow_startlocs[i])
 		
 		return {'FINISHED'}
 
@@ -181,7 +214,7 @@ class calc_flowmap_velocities(bpy.types.Operator):
 	
 	def execute(self, context):
 		flowmesh = context.active_object
-		flowmap_data.flow_velocities = [(p.velocity).copy() for p in flowmesh.particle_systems[0].particles]
+		flow_velocities = [(p.velocity).copy() for p in flowmesh.particle_systems[0].particles]
 		
 		return {'FINISHED'}
 
@@ -242,27 +275,27 @@ class flowmap_writetocolor(bpy.types.Operator):
 		
 		# direction
 		if c0weight > 0.0:
-			if len(flowmap_data.flow_directions) > 0:
-				for i in range(len(flowmap_data.flow_vindex)):
+			if len(flow_directions) > 0:
+				for i in range(len(flow_vindex)):
 					for j in range(len(flowmeshloops)):
-						if flowmeshloops[j].vertex_index == flowmap_data.flow_vindex[i]:
-							finalvlist[j] = flowmap_data.flow_directions[i] * c0weight
+						if flowmeshloops[j].vertex_index == flow_vindex[i]:
+							finalvlist[j] = flow_directions[i] * c0weight
 		
 		# forces
 		if c1weight > 0.0:
-			if len(flowmap_data.flow_velocities) > 0:
-				for i in range(len(flowmap_data.flow_vindex)):
+			if len(flow_velocities) > 0:
+				for i in range(len(flow_vindex)):
 					for j in range(len(flowmeshloops)):
-						if flowmeshloops[j].vertex_index == flowmap_data.flow_vindex[i]:
-							finalvlist[j] = finalvlist[j] + (flowmap_data.flow_velocities[i] * c1weight)
+						if flowmeshloops[j].vertex_index == flow_vindex[i]:
+							finalvlist[j] = finalvlist[j] + (flow_velocities[i] * c1weight)
 		
 		# geometry
 		if c2weight > 0.0:
-			if len(flowmap_data.flow_geominf) > 0:
-				for i in range(len(flowmap_data.flow_vindex)):
+			if len(flow_geominf) > 0:
+				for i in range(len(flow_vindex)):
 					for j in range(len(flowmeshloops)):
-						if flowmeshloops[j].vertex_index == flowmap_data.flow_vindex[i]:
-							finalvlist[j] = finalvlist[j] + (flowmap_data.flow_geominf[i] * c2weight)
+						if flowmeshloops[j].vertex_index == flow_vindex[i]:
+							finalvlist[j] = finalvlist[j] + (flow_geominf[i] * c2weight)
 		
 		for v in finalvlist:
 			if v.magnitude > 0.0:
@@ -272,9 +305,9 @@ class flowmap_writetocolor(bpy.types.Operator):
 		if len(flowmesh.data.vertex_colors) < 1:
 			bpy.ops.mesh.vertex_color_add()
 			newlayer = flowmesh.data.vertex_colors[len(flowmesh.data.vertex_colors) - 1]
-			newlayer.name = 'flow'
+			newlayer.name = 'vertex_color_block_flow'
 		else:
-			newlayer = flowmesh.data.vertex_colors['flow']
+			newlayer = flowmesh.data.vertex_colors['vertex_color_block_flow']
 		
 		# convert + write vertex colors
 		if newlayer != None:
@@ -344,7 +377,7 @@ def clearvars():
 		except:
 			pass
 	
-	flowmap_data.clear_flowmapdata(context)
+	clear_flowmapdata(context)
 
 
 def register():
